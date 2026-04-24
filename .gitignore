@@ -5,3 +5,6 @@
 
 /.quarto/
 **/*.quarto_ipynb
+data/Geopackage_2021_G02_VIC_GDA2020/G02_VIC_GDA2020.gpkg
+data/Geopackage_2021_G04_VIC_GDA2020/G04A_VIC_GDA2020.gpkg
+data/Geopackage_2021_G04_VIC_GDA2020/G04B_VIC_GDA2020.gpkg

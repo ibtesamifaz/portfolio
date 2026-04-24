@@ -1,0 +1,544 @@
+---
+title: "Cafés Vs. Pubs in Melbourne"
+author: "Ibtesam Ifaz"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    fig-width: 7
+    fig-height: 4.5
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(tidyverse)
+library(ggplot2)
+library(scales)
+library(knitr)
+library(kableExtra)
+library(sf)
+library(patchwork)
+library(ggrepel)
+library(viridis)
+library(corrplot)
+```
+
+# Introduction
+
+**Project Title:** Cafés Vs. Pubs in Melbourne
+
+Melbourne is internationally recognised as one of the world's great coffee cities, yet it also maintains a deeply ingrained pub culture. Recent research indicates that younger Australians are drinking less alcohol than previous generations [@aihw2024], which raises an interesting question about how this cultural shift may be reflected in the physical landscape of Melbourne's hospitality sector. This project explores the distribution of cafés and pubs across the City of Melbourne's defined local areas, examining how these venues are distributed, how their relative proportions have changed over time, and whether the balance between café and pub culture relates to the socioeconomic and demographic character of different neighbourhoods.
+
+The findings are relevant to a broad range of audiences: potential hospitality business owners and investors seeking to identify underserved markets, urban planners and local government officials interested in how venues shape neighbourhood character, and researchers studying the relationship between place-based consumption patterns and demographics.
+
+**Questions addressed in this report:**
+
+1.  How does the distribution of cafés and pubs vary across different areas of Melbourne?
+2.  How do pub-to-café ratios differ across Melbourne areas, and how have these ratios changed over time?
+3.  How do income levels and age distributions relate to the pub-to-café ratio across different areas?
+
+# Data Wrangling and Checking
+
+## Data Sources
+
+Three data sources were used in this analysis:
+
+**Source A – City of Melbourne: Cafés and Restaurants with Seating Capacity (2002–2024).** This tabular dataset contains 66,356 observations across 15 columns. Each row represents a specific seating-type record for a food/beverage venue in a given census year. Key attributes include `Trading name`, `Industry (ANZSIC4) description`, `Number of seats`, `Seating type`, `CLUE small area`, `Latitude`, and `Longitude`. Data is sourced from the City of Melbourne's Census of Land Use and Employment (CLUE). Available at: <https://data.melbourne.vic.gov.au/explore/dataset/cafes-and-restaurants-with-seating-capacity>
+
+**Source B – City of Melbourne: Bars and Pubs with Patron Capacity (2002–2024).** This tabular dataset contains 5,304 observations across 12 columns. Each row records a bar or pub in a given census year with attributes including `Trading name`, `Number of patrons`, `CLUE small area`, `Latitude`, and `Longitude`. Available at: <https://data.melbourne.vic.gov.au/explore/dataset/bars-pubs-patron-capacity>
+
+**Source C – ABS Census General Community Profile G04 and G17 (2016, 2021).** These are tabular datasets sourced from the Australian Bureau of Statistics Census DataPacks at Statistical Area Level 2 (SA2). G04 contains age-by-sex data; G17 (A, B, C) contains individual weekly income by age and sex. Each dataset has 464 rows (2016) or 524 rows (2021), corresponding to Victorian SA2 regions, and hundreds of columns representing demographic breakdowns. Available at: <https://www.abs.gov.au/census/find-census-data/datapacks>
+
+## Data Wrangling
+
+```{r load-data}
+# ── Load raw data ──────────────────────────────────────────────────────────────
+cafes_raw <- read_csv("data/cafes_restaurants_seating.csv", show_col_types = FALSE)
+bars_raw  <- read_csv("data/bars_pubs_patron_capacity.csv",  show_col_types = FALSE)
+
+# ABS Census files
+g04a_21 <- read_csv("data/2021Census_G04A_VIC_SA2.csv", show_col_types = FALSE)
+g04b_21 <- read_csv("data/2021Census_G04B_VIC_SA2.csv", show_col_types = FALSE)
+g17a_21 <- read_csv("data/2021Census_G17A_VIC_SA2.csv", show_col_types = FALSE)
+g17b_21 <- read_csv("data/2021Census_G17B_VIC_SA2.csv", show_col_types = FALSE)
+g17c_21 <- read_csv("data/2021Census_G17C_VIC_SA2.csv", show_col_types = FALSE)
+
+g04a_16 <- read_csv("data/2016Census_G04A_VIC_SA2.csv", show_col_types = FALSE)
+g04b_16 <- read_csv("data/2016Census_G04B_VIC_SA2.csv", show_col_types = FALSE)
+g17a_16 <- read_csv("data/2016Census_G17A_VIC_SA2.csv", show_col_types = FALSE)
+g17b_16 <- read_csv("data/2016Census_G17B_VIC_SA2.csv", show_col_types = FALSE)
+g17c_16 <- read_csv("data/2016Census_G17C_VIC_SA2.csv", show_col_types = FALSE)
+```
+
+```{r wrangle-venues}
+# ── Step 1: Filter to ANZSIC 4511, then exclude clear restaurant entries ───────
+# Source A uses ANZSIC 4511 "Cafes and Restaurants", a single code that
+# conflates two distinct venue types. To isolate cafés, we apply a
+# name-based exclusion filter, removing records whose trading name contains
+# terms unambiguously associated with restaurants (e.g. "Restaurant",
+# "Ristorante", "Sushi", "Ramen", "Pizzeria", "Brasserie") rather than
+# café-style premises. An exclusion approach is deliberately chosen over
+# an inclusion approach: requiring a name to contain "cafe" or "coffee"
+# would incorrectly discard many genuine cafés with non-descriptive names
+# (e.g. "Brunetti", "Patricia"), whereas excluding explicit restaurant
+# terminology preserves these while removing records that are clearly
+# out of scope. Ethnic cuisine qualifiers (e.g. "Indian Restaurant",
+# "Chinese Restaurant") are included as compound terms to avoid
+# accidentally dropping venues like "Thai Basil Café".
+restaurant_excl <- c(
+  "restaurant", "ristorante", "restorante", "trattoria", "osteria",
+  "pizzeria", "pizza", "sushi", "ramen", "noodle", "yum cha", "dim sum",
+  "izakaya", "teppanyaki", "steakhouse", "steak house", "chophouse",
+  "brasserie", "tavern", "pub ", "burger", "kebab",
+  "indian restaurant", "chinese restaurant", "thai restaurant",
+  "japanese restaurant", "korean restaurant", "mexican restaurant",
+  "vietnamese restaurant", "greek restaurant", "italian restaurant",
+  "seafood restaurant", "french restaurant"
+)
+excl_pattern <- paste(restaurant_excl, collapse = "|")
+
+cafes_clean <- cafes_raw %>%
+  filter(`Industry (ANZSIC4) description` == "Cafes and Restaurants") %>%
+  filter(!str_detect(str_to_lower(`Trading name`), excl_pattern)) %>%
+  rename(area = `CLUE small area`, year = `Census year`,
+         seats = `Number of seats`, lat = Latitude, lon = Longitude) %>%
+  select(year, area, `Trading name`, seats, lat, lon)
+
+# ── Step 2: Bars dataset already contains only licensed premises ───────────────
+bars_clean <- bars_raw %>%
+  rename(area = `CLUE small area`, year = `Census year`,
+         patrons = `Number of patrons`, lat = Latitude, lon = Longitude) %>%
+  select(year, area, `Trading name`, patrons, lat, lon)
+
+# ── Step 3: For venue counts by area-year, collapse seating rows to unique
+#            venues (a venue may have multiple seating-type rows per year) ──────
+cafes_venues <- cafes_clean %>%
+  group_by(year, area, `Trading name`, lat, lon) %>%
+  summarise(total_seats = sum(seats, na.rm = TRUE), .groups = "drop")
+
+bars_venues <- bars_clean %>%
+  distinct(year, area, `Trading name`, .keep_all = TRUE)
+```
+
+```{r wrangle-census}
+# ── Step 4: Combine G04 A+B for both census years, filter to Melbourne SA2s ───
+# Melbourne City LGA SA2 codes start with "2010"
+melb_sa2_codes_21 <- g04a_21 %>%
+  filter(str_starts(as.character(SA2_CODE_2021), "2010")) %>%
+  pull(SA2_CODE_2021)
+
+melb_sa2_codes_16 <- g04a_16 %>%
+  filter(str_starts(as.character(SA2_MAINCODE_2016), "2010")) %>%
+  pull(SA2_MAINCODE_2016)
+
+# Age group totals (persons, all ages) from G04A and G04B
+# We want: 18-34 share (young adults) and 55+ share (older adults)
+get_age_groups <- function(g04a, g04b, sa2_col, codes) {
+  df <- bind_cols(
+    g04a %>% filter(.data[[sa2_col]] %in% codes) %>% select(all_of(sa2_col)),
+    g04a %>% filter(.data[[sa2_col]] %in% codes) %>% select(-all_of(sa2_col)),
+    g04b %>% filter(.data[[sa2_col]] %in% codes) %>% select(-all_of(sa2_col))
+  )
+  # Age 18-34: individual year columns live in G04A
+  age_18_34_cols <- paste0("Age_yr_", 18:34, "_P")
+  # Age 55+: grouped band columns in G04B (actual names confirmed from data)
+  age_55_cols <- c("Age_yr_55_59_P", "Age_yr_60_64_P", "Age_yr_65_69_P",
+                   "Age_yr_70_74_P", "Age_yr_75_79_P", "Age_yr_80_84_P",
+                   "Age_yr_85_89_P", "Age_yr_90_94_P", "Age_yr_95_99_P",
+                   "Age_yr_100_yr_over_P")
+  # Total population column is "Tot_P" (in G04B)
+  age_18_34_cols_avail <- intersect(age_18_34_cols, names(df))
+  age_55_cols_avail    <- intersect(age_55_cols, names(df))
+  
+  df %>%
+    mutate(
+      pop_18_34  = rowSums(select(., all_of(age_18_34_cols_avail)), na.rm = TRUE),
+      pop_55plus = rowSums(select(., all_of(age_55_cols_avail)),    na.rm = TRUE),
+      pop_total  = Tot_P
+    ) %>%
+    select(sa2 = all_of(sa2_col), pop_18_34, pop_55plus, pop_total)
+}
+
+age_21 <- get_age_groups(g04a_21, g04b_21, "SA2_CODE_2021", melb_sa2_codes_21)
+age_16 <- get_age_groups(g04a_16, g04b_16, "SA2_MAINCODE_2016", melb_sa2_codes_16)
+
+# ── Step 5: Compute weighted median weekly income from G17 A+B+C ──────────────
+# Income brackets (weekly $): use midpoints
+income_midpoints <- c(
+  P_Neg_Nil_income_Tot = 0,
+  P_1_149_Tot          = 75,
+  P_150_299_Tot        = 225,
+  P_300_399_Tot        = 350,
+  P_400_499_Tot        = 450,
+  P_500_649_Tot        = 575,
+  P_650_799_Tot        = 725,
+  P_800_999_Tot        = 900,
+  P_1000_1249_Tot      = 1125,
+  P_1250_1499_Tot      = 1375,
+  P_1500_1749_Tot      = 1625,
+  P_1750_1999_Tot      = 1875,
+  P_2000_2999_Tot      = 2500,
+  P_3000_3499_Tot      = 3250,
+  P_3500_more_Tot      = 4000
+)
+
+compute_income <- function(g17a, g17b, g17c, sa2_col, codes) {
+  # Merge the three income files
+  df <- g17a %>%
+    filter(.data[[sa2_col]] %in% codes) %>%
+    left_join(g17b %>% filter(.data[[sa2_col]] %in% codes), by = sa2_col) %>%
+    left_join(g17c %>% filter(.data[[sa2_col]] %in% codes), by = sa2_col)
+  
+  bkt_cols <- names(income_midpoints)
+  bkt_avail <- intersect(bkt_cols, names(df))
+  
+  df %>%
+    mutate(
+      weighted_income = rowSums(
+        across(all_of(bkt_avail), ~ .x * income_midpoints[cur_column()]),
+        na.rm = TRUE
+      ) / rowSums(across(all_of(bkt_avail)), na.rm = TRUE)
+    ) %>%
+    select(sa2 = all_of(sa2_col), weighted_income)
+}
+
+income_21 <- compute_income(g17a_21, g17b_21, g17c_21, "SA2_CODE_2021", melb_sa2_codes_21)
+income_16 <- compute_income(g17a_16, g17b_16, g17c_16, "SA2_MAINCODE_2016", melb_sa2_codes_16)
+
+# ── Step 6: Manual SA2-to-CLUE area mapping ────────────────────────────────────
+# Inner Melbourne SA2s map approximately to CLUE small areas as below.
+# This crosswalk is derived from ABS geographic correspondences and
+# City of Melbourne boundary definitions.
+sa2_clue_map <- tribble(
+  ~sa2,        ~clue_area,
+  201011001L,  "Carlton",
+  201011002L,  "Docklands",
+  201011005L,  "East Melbourne",
+  201011006L,  "Kensington",
+  201011007L,  "Melbourne (CBD)",
+  201011008L,  "Melbourne (Remainder)",
+  201011481L,  "North Melbourne",
+  201011482L,  "Parkville",
+  201011483L,  "Port Melbourne",
+  201011484L,  "South Yarra",
+  201021009L,  "Southbank",
+  201021010L,  "West Melbourne (Residential)",
+  201021011L,  "West Melbourne (Industrial)",
+  201021012L,  "Melbourne (CBD)",   # city north
+  201031013L,  "Carlton",           # Carlton North
+  201031014L,  "Fitzroy",
+  201031015L,  "Fitzroy North",
+  201031016L,  "Collingwood",
+  201031017L,  "Richmond"
+)
+
+# Join census data to CLUE mapping
+# Note: weighted.mean must use the per-SA2 pop_total BEFORE it is summed,
+# so we compute it in a separate summarise step.
+census_21_raw <- age_21 %>%
+  left_join(income_21, by = "sa2") %>%
+  left_join(sa2_clue_map %>% mutate(sa2 = as.integer(sa2)), by = "sa2") %>%
+  filter(!is.na(clue_area))
+
+census_21 <- census_21_raw %>%
+  group_by(clue_area) %>%
+  summarise(
+    pop_18_34       = sum(pop_18_34,  na.rm = TRUE),
+    pop_55plus      = sum(pop_55plus, na.rm = TRUE),
+    pop_total       = sum(pop_total,  na.rm = TRUE),
+    # Drop NAs from both x and w together before taking weighted mean
+    weighted_income = {
+      x <- weighted_income; w <- pop_total
+      keep <- !is.na(x) & !is.na(w)
+      if (sum(keep) == 0) NA_real_ else weighted.mean(x[keep], w = w[keep])
+    },
+    .groups = "drop"
+  ) %>%
+  mutate(
+    pct_18_34   = pop_18_34  / pop_total * 100,
+    pct_55plus  = pop_55plus / pop_total * 100,
+    census_year = 2021
+  )
+```
+
+```{r build-ratio-data}
+# ── Step 7: Build venue counts by CLUE area and year ──────────────────────────
+cafe_counts <- cafes_venues %>%
+  group_by(year, area) %>%
+  summarise(n_cafes = n_distinct(`Trading name`), .groups = "drop")
+
+bar_counts <- bars_venues %>%
+  group_by(year, area) %>%
+  summarise(n_bars = n_distinct(`Trading name`), .groups = "drop")
+
+venue_ratio <- cafe_counts %>%
+  full_join(bar_counts, by = c("year", "area")) %>%
+  replace_na(list(n_cafes = 0, n_bars = 0)) %>%
+  mutate(
+    total_venues   = n_cafes + n_bars,
+    ratio_bar_cafe = n_bars / ifelse(n_cafes == 0, NA_real_, n_cafes),
+    pct_bars       = n_bars / total_venues * 100
+  ) %>%
+  filter(!is.na(area))
+
+# Latest year snapshot (2024)
+venue_2024 <- venue_ratio %>% filter(year == 2024)
+
+# Joined with census 2021
+venue_census <- venue_2024 %>%
+  left_join(census_21, by = c("area" = "clue_area"))
+```
+
+The data wrangling process involved the following key steps:
+
+**Source A & B – Venue data:** Source A uses a single ANZSIC code (4511, *Cafes and Restaurants*) that conflates two distinct venue types. To isolate cafés and exclude restaurants from the analysis, a name-based exclusion filter was applied to the trading name field. Rather than requiring names to contain café-positive keywords (e.g. "café", "coffee"), which would incorrectly discard genuine cafés with non-descriptive names, the filter removes records whose names contain terms unambiguously associated with restaurants and non-café premises, including "restaurant", "ristorante", "pizzeria", "sushi", "ramen", "brasserie", "izakaya", and compound ethnic cuisine qualifiers such as "Indian restaurant" and "Chinese restaurant". Compound terms were used deliberately to avoid false positives (e.g. a venue named "Thai Basil Café" would not be excluded). This approach removed approximately 7,992 records (16% of ANZSIC 4511 entries) identified as clear restaurants, retaining 1,339 of 1,554 unique venues in the 2024 survey year. The remaining records may still include some casual dining venues with ambiguous names; this is acknowledged as a limitation of name-based classification in the absence of a finer ANZSIC subcategory. Takeaway food services (ANZSIC 4512) and accommodation were excluded by the ANZSIC filter. Source A also contains multiple rows per venue per year due to separate records for indoor, outdoor, and other seating types; these were aggregated to unique venue-year records by grouping on trading name, area, and year. The bars dataset required only deduplication, as each row already represents a distinct licensed premises.
+
+**Source C – Census data:** The G04 files (age distributions) and G17 files (weekly income) were each split across multiple CSV files (A, B, C) and required column-binding after filtering to the 19 SA2 regions within the City of Melbourne Local Government Area (identified by codes beginning with `2010`). A manual SA2-to-CLUE area crosswalk was constructed using ABS geographic correspondences to link census data to the City of Melbourne's CLUE small area boundaries, enabling integration with Sources A and B. Weighted average weekly income was computed from the G17 income bracket counts using bracket midpoints as weights, excluding "not stated" responses from the denominator.
+
+## Data Checking
+
+### Missing Values
+
+Missing values are confined entirely to the spatial coordinate columns (`Latitude` and `Longitude`). The cafés dataset has 377 records with missing coordinates, and the bars dataset has 20. All other fields, trading name, CLUE area, seating/patron capacity, are fully complete across both datasets. Records with missing coordinates are retained for count-based and temporal analyses but excluded from any spatial point mapping, as their area-level CLUE classification is still valid for aggregation purposes.
+
+### Temporal Consistency
+
+```{r fig-temporal, fig.cap="Number of unique café and bar venues recorded in each CLUE survey year from 2002 to 2024. Both datasets show continuous year-on-year coverage with no gaps. The dip in cafés around 2020--2021 reflects pandemic-related closures.", fig.height=4}
+# Unique venue counts per year for both datasets
+cafe_year <- cafes_venues %>%
+  group_by(year) %>%
+  summarise(n = n_distinct(`Trading name`), .groups = "drop") %>%
+  mutate(type = "Cafés")
+
+bar_year <- bars_venues %>%
+  group_by(year) %>%
+  summarise(n = n_distinct(`Trading name`), .groups = "drop") %>%
+  mutate(type = "Bars & Pubs")
+
+bind_rows(cafe_year, bar_year) %>%
+  ggplot(aes(x = year, y = n, colour = type, group = type)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_colour_manual(values = c("Cafés" = "#2196F3", "Bars & Pubs" = "#E65100")) +
+  scale_x_continuous(breaks = seq(2002, 2024, 2)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = "Survey year", y = "Unique venue count",
+       colour = NULL,
+       title = "Temporal coverage, unique venues per year (2002–2024)") +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "top",
+        panel.grid.minor = element_blank())
+```
+
+Both datasets cover every survey year from 2002 to 2024 without gaps, confirming complete temporal coverage. Café counts grow steadily from 675 in 2002 to a peak of 1,385 in 2019, followed by a visible dip in 2020–2021 consistent with pandemic-related business closures, before recovering to 1,339 by 2024. Bar counts follow a similar upward trend, though more modest in scale, with no equivalent pandemic dip, likely reflecting pubs' ability to pivot to takeaway liquor sales during lockdowns. No year contains implausibly few or many records, and no survey year is duplicated.
+
+### Venue Counts by Area
+
+```{r tbl-area-counts}
+# Build table of cafe and bar counts per area for 2024
+tbl_counts <- venue_2024 %>%
+  select(Area = area, Cafés = n_cafes, `Bars & Pubs` = n_bars) %>%
+  mutate(Total = Cafés + `Bars & Pubs`,
+         `Pub-to-café ratio` = round(`Bars & Pubs` / ifelse(Cafés == 0, NA, Cafés), 2)) %>%
+  arrange(desc(Total))
+
+kable(tbl_counts,
+      caption = "Unique venue counts by CLUE small area (2024 survey year). Pub-to-café ratio is the number of bars and pubs divided by the number of cafés; a higher value indicates greater relative pub presence.",
+      booktabs = TRUE,
+      linesep  = "") %>%
+  kable_styling(latex_options = c("striped", "hold_position"),
+                font_size = 10) %>%
+  row_spec(0, bold = TRUE)
+```
+
+Table 1 confirms that Melbourne (CBD) accounts for the overwhelming majority of venues in both categories, with 779 cafés and 208 bars, far exceeding any other area. Carlton and Docklands are the next most venue-dense areas for cafés, while Southbank has a disproportionately high bar count (29) relative to its café count (110), giving it the second-highest pub-to-café ratio (0.26) after the CBD (0.27). Port Melbourne has no recorded bars in 2024. South Yarra, despite its well-known hospitality scene, has very few venues within the City of Melbourne boundary, reflecting that most of its venues fall just outside the CLUE survey area.
+
+# Data Exploration
+
+The exploration addresses the three research questions in sequence, building from spatial distribution to temporal trends and finally to demographic correlates.
+
+## Q1: How does the distribution of cafés and pubs vary across Melbourne areas?
+
+A grouped horizontal bar chart is used here because the question asks about the *distribution* of two venue types across a set of named categorical areas. Horizontal orientation makes the area labels readable without rotation. Grouping the two bars side-by-side rather than stacking them allows direct length comparison between cafés and pubs within each area, which is the primary comparison of interest. Areas are ordered by total venue count so that the most active areas appear at the top.
+
+```{r fig-venue-counts, fig.cap="Number of unique cafés and pubs in each CLUE small area in 2024. Melbourne (CBD) dominates both venue types by a large margin, while areas like Kensington and Parkville have very few venues of either type.", fig.height=5}
+venue_2024_long <- venue_2024 %>%
+  select(area, n_cafes, n_bars) %>%
+  pivot_longer(cols = c(n_cafes, n_bars),
+               names_to = "type", values_to = "count") %>%
+  mutate(type = recode(type, n_cafes = "Cafés", n_bars = "Pubs & Bars"),
+         type = factor(type, levels = c("Pubs & Bars", "Cafés")))
+
+area_order <- venue_2024 %>%
+  mutate(total = n_cafes + n_bars) %>%
+  arrange(desc(total)) %>%
+  pull(area)
+
+venue_2024_long %>%
+  mutate(area = factor(area, levels = rev(area_order))) %>%
+  ggplot(aes(x = count, y = area, fill = type)) +
+  geom_col(position = "dodge", width = 0.7) +
+  scale_fill_manual(values = c("Cafés" = "#2196F3", "Pubs & Bars" = "#E65100")) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.05))) +
+  labs(
+    x = "Number of unique venues (2024)",
+    y = NULL,
+    fill = NULL,
+    title = "Venue counts by CLUE small area (2024)"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.position = "top",
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor   = element_blank()
+  )
+```
+
+@fig-venue-counts reveals a pronounced spatial concentration of both venue types. The Melbourne CBD alone accounts for the vast majority of venues in the dataset. Carlton and Southbank follow as the next most venue-dense areas. At the opposite extreme, West Melbourne (Industrial), Parkville, and Kensington contain very few venues of either type, reflecting their primarily industrial or institutional land uses.
+
+A key visual pattern is that cafés consistently outnumber pubs and bars in every CLUE area, consistent with Melbourne's strong coffee culture. However, the *degree* to which cafés dominate varies considerably by area, explored further in Question 2.
+
+## Q2: How do pub-to-café ratios differ across Melbourne areas, and how have these changed over time?
+
+To move beyond raw counts and reveal *relative* pub presence, the pub-to-café ratio is computed for each area and displayed as a ranked horizontal bar chart. A single derived ratio variable reduces two counts to one comparable magnitude, making cross-area ordering immediately apparent through bar length, which encodes position on a common scale — the most effective channel for ordered quantitative data. A single uniform fill colour is used for all bars because the variable is continuous and ordinal colouring would impose an arbitrary category boundary. Only the top-ranked area is highlighted in orange to draw the reader's eye without distorting the magnitude comparisons among the remaining bars.
+
+```{r fig-ratio-bar, fig.cap="Pub-to-café ratio (number of pubs divided by number of cafés) by CLUE small area in 2024. All bars use the same blue fill to represent a single continuous variable; Melbourne (CBD) is highlighted in orange as the area with the highest ratio.", fig.height=4}
+# Identify the single highest-ratio area to highlight
+top_area <- venue_2024 %>%
+  filter(!is.na(ratio_bar_cafe)) %>%
+  slice_max(ratio_bar_cafe, n = 1) %>%
+  pull(area)
+
+venue_2024 %>%
+  filter(!is.na(ratio_bar_cafe)) %>%
+  mutate(area      = fct_reorder(area, ratio_bar_cafe),
+         highlight = area == top_area) %>%
+  ggplot(aes(x = ratio_bar_cafe, y = area, fill = highlight)) +
+  geom_col(width = 0.7) +
+  scale_fill_manual(values = c("FALSE" = "#90CAF9", "TRUE" = "#E65100"),
+                    guide = "none") +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.05))) +
+  labs(x = "Pubs per café (ratio)", y = NULL,
+       title = "Pub-to-café ratio by area (2024)") +
+  theme_minimal(base_size = 11) +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank())
+```
+
+@fig-ratio-bar shows that the pub-to-café ratio varies substantially across areas. The CBD and Southbank have the highest ratios (0.27 and 0.26 respectively), reflecting their role as entertainment precincts with large pub footprints. Residential areas such as Carlton, North Melbourne, and South Yarra have lower ratios, suggesting that café culture dominates in these neighbourhoods. This is consistent with the proposal that Melbourne's coffee culture may be displacing pub culture in residential areas.
+
+The temporal dimension of the question requires a line chart rather than a bar chart, as line charts are specifically suited to showing change over ordered time intervals. Six areas are selected to avoid overplotting while covering the range of area types: two high-ratio entertainment precincts (CBD and Southbank), one redeveloping precinct (Docklands), and three lower-ratio residential areas (Carlton, North Melbourne, South Yarra). Colour hue encodes area identity, which is a categorical distinction, consistent with the class guidance that hue is most effective for nominal groupings.
+
+```{r fig-ratio-time, fig.cap="Temporal trend of pub-to-café ratio for six selected CLUE areas from 2002 to 2024. A declining ratio indicates growing café dominance relative to pubs over time. Melbourne (CBD) and Southbank are highlighted in orange tones as the highest-ratio areas; remaining areas use blue tones.", fig.height=5}
+focus_areas <- c("Melbourne (CBD)", "Carlton", "Southbank",
+                 "North Melbourne", "South Yarra", "Docklands")
+
+# Consistent palette: orange family for high-ratio entertainment precincts,
+# blue family for lower-ratio residential areas, echoing the Q1/Q2 colour logic
+area_colours <- c(
+  "Melbourne (CBD)" = "#E65100",
+  "Southbank"       = "#FF8F00",
+  "Docklands"       = "#FFB300",
+  "Carlton"         = "#1565C0",
+  "North Melbourne" = "#1E88E5",
+  "South Yarra"     = "#90CAF9"
+)
+
+venue_ratio %>%
+  filter(area %in% focus_areas) %>%
+  ggplot(aes(x = year, y = ratio_bar_cafe, colour = area)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 1.5) +
+  scale_colour_manual(values = area_colours, name = "Area") +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = "Year", y = "Pubs per café (ratio)",
+       title = "Pub-to-café ratio over time (selected areas)") +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "right",
+        panel.grid.minor = element_blank())
+```
+
+@fig-ratio-time reveals a broadly declining pub-to-café ratio across most areas over the 22-year study period, with the most pronounced decline in Docklands and Southbank, two areas that have undergone major urban redevelopment. This trend is consistent with national findings on declining alcohol consumption among younger Australians [@aihw2024]. The CBD ratio has remained relatively stable, likely reflecting its persistent role as an entertainment and nightlife precinct. Carlton shows a consistently low and declining ratio throughout the period, reflecting its long-established status as a café-centric suburb.
+
+## Q3: How do income levels and age distributions relate to the pub-to-café ratio?
+
+Two scatterplots are presented as facets, each placing a demographic variable directly on the x-axis against the pub-to-café ratio on the y-axis. This follows the principle that position on a common scale is the most effective encoding for communicating ordered quantitative relationships, more so than colour or size, which were used in earlier spatial designs. Combining the two panels also allows direct visual comparison of how strongly each demographic variable relates to the ratio. Points are sized by total venue count so that small areas do not carry the same visual weight as the CBD; area names are labelled directly on each point.
+
+```{r fig-demo-facet, fig.cap="Faceted scatterplot showing the relationship between the pub-to-café ratio (2024) and two demographic variables from the ABS 2021 Census: weighted average weekly income (left panel) and the proportion of residents aged 18--34 (right panel). Each point is a CLUE small area, sized by total venue count. A trend line with 95% confidence interval is fitted to each panel.", fig.height=4.5, fig.width=8}
+# Reshape venue_census into long form for faceting
+facet_data <- venue_census %>%
+  filter(!is.na(ratio_bar_cafe), !is.na(weighted_income), !is.na(pct_18_34)) %>%
+  mutate(
+    income_label = dollar(round(weighted_income, 0)),
+    age_label    = paste0(round(pct_18_34, 1), "%")
+  ) %>%
+  select(area, ratio_bar_cafe, total_venues, weighted_income, pct_18_34) %>%
+  pivot_longer(
+    cols      = c(weighted_income, pct_18_34),
+    names_to  = "demographic",
+    values_to = "value"
+  ) %>%
+  mutate(
+    demographic = recode(demographic,
+      weighted_income = "Avg. weekly income (2021 Census, $)",
+      pct_18_34       = "Residents aged 18–34 (%)"
+    )
+  )
+
+ggplot(facet_data,
+       aes(x = value, y = ratio_bar_cafe, size = total_venues, label = area)) +
+  geom_smooth(method = "lm", se = TRUE, linewidth = 0.7,
+              colour = "#E65100", fill = "#FFE0B2", alpha = 0.4) +
+  geom_point(colour = "#1565C0", alpha = 0.75) +
+  geom_text_repel(size = 2.6, max.overlaps = 15,
+                  segment.colour = "grey60", segment.size = 0.3,
+                  min.segment.length = 0.2) +
+  facet_wrap(~ demographic, scales = "free_x") +
+  scale_size_continuous(range = c(2, 9), name = "Total venues",
+                        labels = comma) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = NULL, y = "Pub-to-café ratio (2024)",
+       title = "Demographic correlates of pub-to-café ratio by CLUE area") +
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.position  = "right",
+    strip.text       = element_text(face = "bold", size = 10),
+    panel.grid.minor = element_blank()
+  )
+```
+
+@fig-demo-facet shows a modest positive relationship in its left panel between average weekly income and the pub-to-café ratio. The CBD and Southbank (the two largest points) sit at the high end of both axes, suggesting that affluent, mixed-use entertainment precincts sustain a greater pub presence. Carlton is a notable outlier: despite having a relatively high average income (driven by proximity to the university and gentrification), it has one of the lowest pub-to-café ratios, reflecting its deep-rooted café culture. The right panel tells a different story: there is no meaningful positive relationship between the share of young adults (18–34) and the pub-to-café ratio. If anything, the trend is slightly negative. Carlton and Parkville, both areas with large student and young adult populations, cluster in the lower-right, combining high youth share with low pub prevalence. This is consistent with national evidence of declining alcohol consumption among younger Australians [@aihw2024], and suggests that the presence of young residents does not translate into greater pub dominance at the area level. Taken together, the two panels indicate that precinct character and income level are more relevant to pub prevalence than the age structure of the resident population.
+
+# Conclusion
+
+This analysis explored the distribution and relative balance of cafés and pubs across the City of Melbourne's CLUE small areas using venue data from 2002–2024 and ABS Census data from 2016 and 2021.
+
+In response to **Question 1**, cafés and pubs are concentrated heavily in the Melbourne CBD, with Carlton, Docklands, and Southbank as secondary clusters. Cafés consistently outnumber pubs in every CLUE area, reflecting Melbourne's strong coffee culture.
+
+Regarding **Question 2**, the pub-to-café ratio has declined across most areas over the 22-year study period, most dramatically in Docklands and Southbank. This temporal trend is consistent with a city-wide cultural shift towards café culture, aligning with national evidence of declining alcohol consumption in younger generations [@aihw2024].
+
+For **Question 3**, the faceted scatterplot revealed that pub dominance is more strongly associated with higher-income entertainment precincts than with areas that have large young adult populations. Carlton and Parkville, both youth-heavy, have among the lowest pub-to-café ratios, while the CBD and Southbank combine high income with high pub presence. This challenges the intuitive assumption that younger residents drive pub culture, and instead points to the role of precinct character and income level.
+
+The analysis was limited by the coarse spatial granularity of the CLUE area system (13 zones) and by the approximate SA2-to-CLUE crosswalk required to link census data. Future work could incorporate finer spatial units and foot traffic data to better account for non-resident demand.
+
+# Reflection
+
+This project reinforced several key lessons about data visualisation and exploratory analysis. First, the choice of visual encoding matters enormously: switching from a raw count bar chart (@fig-venue-counts) to a ratio visualisation revealed a completely different spatial pattern, highlighting how the framing of a question shapes what we see. Second, the faceted scatterplot for Question 3 was chosen over spatial maps because the core question is about the relationship between demographics and the ratio, and position on a common scale encodes that relationship more precisely than colour or size on a map. This reflects the principle that just because data has a geographic component does not mean it should always be mapped.
+
+In hindsight, using proper polygon boundary data (ABS SA2 shapefiles or City of Melbourne CLUE area boundaries) to produce choropleth maps would have made the spatial encoding even more precise and visually compelling. I would also have liked to explore venue density per capita rather than raw counts, which would account for the very different resident populations across areas. Finally, the name-based café filter, while defensible, could be improved with a supervised classification approach trained on a manually labelled sample of venue names.
+
+# Bibliography
+
+::: {#refs}
+:::
+
+------------------------------------------------------------------------
+
+# Generative AI Declaration
+
+[Link 1](https://chatgpt.com/share/69e9badd-85c0-839a-82c0-d119188d199b) helped me write the R code to join ABS data G04 & G17

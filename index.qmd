@@ -1,0 +1,66 @@
+---
+title: "Ibtesam Ifaz"
+subtitle: "Data Analyst · Melbourne, Australia"
+page-layout: full
+toc: false
+---
+
+```{=html}
+<div class="hero">
+  <p class="lead">
+    I turn messy, real-world datasets into clear visual stories.
+    My work spans urban analytics, political data, and global policy —
+    all built in R.
+  </p>
+</div>
+```
+
+## Projects
+
+```{=html}
+<div class="card-grid">
+
+  <div class="project-card">
+    <div class="card-tag">Urban Analytics</div>
+    <h3><a href="cafes_vs_pubs.qmd">Cafés vs Pubs in Melbourne</a></h3>
+    <p>
+      Mapping how Melbourne's café and pub culture is distributed across
+      neighbourhoods, and how that balance has shifted over two decades —
+      linked to income and age demographics.
+    </p>
+    <div class="card-tools">ggplot2 · sf · viridis · ABS Census</div>
+  </div>
+
+  <div class="project-card">
+    <div class="card-tag">Political Data</div>
+    <h3><a href="election_analytics.qmd">National Election Analytics</a></h3>
+    <p>
+      Analysing Australian federal election results from 2019 and 2022,
+      with a focus on independent candidates — which seats were won, lost,
+      or flipped, and the swing patterns behind them.
+    </p>
+    <div class="card-tools">ggplot2 · AEC data · patchwork · ggrepel</div>
+  </div>
+
+  <div class="project-card">
+    <div class="card-tag">Global Policy</div>
+    <h3><a href="military_spending_report.qmd">Military Spending Report</a></h3>
+    <p>
+      Tracking military expenditure trends across Australia, China, India,
+      and Russia from 2012–2023, and exploring the relationship between
+      spending, GDP share, and population.
+    </p>
+    <div class="card-tools">ggplot2 · tidyverse · SIPRI data</div>
+  </div>
+
+</div>
+```
+
+## About
+
+I'm a data analytics student at Monash University with a focus on
+visualisation and applied statistics. I work primarily in R, using
+tools like `ggplot2`, `sf`, and Quarto to communicate findings clearly.
+
+Feel free to reach out via [LinkedIn](https://www.linkedin.com/in/ibtesam-ifaz-a16a48183/)
+or explore my code on [GitHub](https://github.com/ibtesamifaz).

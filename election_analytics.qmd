@@ -844,7 +844,7 @@ p1 + p2
 Goldstein is an electorate which includes Melbourne's most affluent suburbs like Hampton, Brighton and Sandringham. Goldstein as a subset of Victoria represents voters who are wealthy, progressive and highly-educated. For example, kangaroos come in different sizes and forms, therefore observing one particular breed of kanagaroo wouldn't be representative of the population and won't show reliable findings during analysis.
 
 | Demographic Distribution | Goldstein | Victoria | Representative of population? |
-|----|----|----|----|
+|-----------------|-----------------------|-----------------|-----------------|
 | Gender | Approx. 50/50 | Approx. 50/50 | Yes |
 | Age | Fewer in 18–30 range, more in 61+ group | A balanced age distribution | No |
 | Income | High concentration in top bracket (\$3500+/week) | A more even/flat distribution | No |

@@ -12,7 +12,7 @@ jobs:
         run: |
           install.packages(c("tidyverse", "ggplot2", "scales", "knitr",
             "kableExtra", "sf", "patchwork", "ggrepel", "viridis",
-            "corrplot", "plotly", "leaflet"))
+            "corrplot", "plotly", "leaflet", "rmarkdown"))
         shell: Rscript {0}
       - uses: quarto-dev/quarto-actions/setup@v2
       - uses: quarto-dev/quarto-actions/publish@v2
